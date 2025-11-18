@@ -1,0 +1,279 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  teacher
+  hod
+  tech_staff
+}
+
+enum BookingStatus {
+  pending
+  approved
+  rejected
+  completed
+}
+
+enum EquipmentCondition {
+  active
+  not_working
+  under_repair
+}
+
+enum HallStatus {
+  available
+  booked
+  ongoing
+  maintenance
+}
+
+enum ComponentStatus {
+  operational
+  faulty
+  maintenance
+}
+
+enum ComponentType {
+  projector
+  whiteboard
+  speaker
+  microphone
+  lighting
+  ac
+  door_lock
+  wifi_router
+  other
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  profiles Profile[]
+  halls    SeminarHall[]
+}
+
+model User {
+  id         String   @id
+  email      String   @unique
+  clerkId    String   @unique
+  image_url  String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  profile Profile?
+}
+
+model Profile {
+  id         String   @id @default(uuid())
+  email      String
+  name       String
+  role       UserRole
+  phone      String?
+  avatar_url String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  department_id String?
+  department    Department? @relation(fields: [department_id], references: [id], onDelete: SetNull)
+
+  user_id String? @unique
+  user    User?   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  hallAssignments  HallTechStaff[]
+  equipmentUpdated Equipment[]     @relation("updated_by_equipment")
+  equipmentLogs    EquipmentLog[]  @relation("updated_by_log")
+
+  teacherBookings Booking[] @relation("teacher_bookings")
+  hodBookings     Booking[] @relation("hod_approval")
+
+  bookingLogsPerformed     BookingLog[]              @relation("log_performed_by")
+  notifications            Notification[]
+  componentMaintenanceLogs ComponentMaintenanceLog[]
+}
+
+model SeminarHall {
+  id               String     @id @default(uuid())
+  name             String
+  seating_capacity Int
+  location         String
+  description      String?
+  image_url        String?
+  status           HallStatus @default(available)
+  created_at       DateTime   @default(now())
+  updated_at       DateTime   @updatedAt
+
+  department_id String
+  department    Department @relation(fields: [department_id], references: [id], onDelete: Cascade)
+
+  tech_staff HallTechStaff[]
+  equipment  Equipment[]
+  bookings   Booking[]
+  components HallComponent[]
+
+  @@index([department_id])
+}
+
+model HallTechStaff {
+  id            String   @id @default(uuid())
+  hall_id       String
+  tech_staff_id String
+  created_at    DateTime @default(now())
+
+  hall       SeminarHall @relation(fields: [hall_id], references: [id], onDelete: Cascade)
+  tech_staff Profile     @relation(fields: [tech_staff_id], references: [id])
+
+  @@unique([hall_id, tech_staff_id])
+  @@index([hall_id])
+  @@index([tech_staff_id])
+}
+
+model Equipment {
+  id              String             @id @default(uuid())
+  name            String
+  type            String
+  serial_number   String?
+  condition       EquipmentCondition @default(active)
+  last_updated_at DateTime           @default(now())
+  created_at      DateTime           @default(now())
+
+  hall_id String
+  hall    SeminarHall @relation(fields: [hall_id], references: [id], onDelete: Cascade)
+
+  last_updated_by String?
+  updated_by      Profile? @relation("updated_by_equipment", fields: [last_updated_by], references: [id], onDelete: SetNull)
+
+  logs EquipmentLog[]
+
+  @@index([hall_id])
+}
+
+model EquipmentLog {
+  id                 String             @id @default(uuid())
+  previous_condition EquipmentCondition
+  new_condition      EquipmentCondition
+  notes              String?
+  created_at         DateTime           @default(now())
+
+  equipment_id String
+  equipment    Equipment @relation(fields: [equipment_id], references: [id], onDelete: Cascade)
+
+  updated_by String
+  user       Profile @relation("updated_by_log", fields: [updated_by], references: [id])
+
+  @@index([equipment_id])
+}
+
+model Booking {
+  id                    String        @id @default(uuid())
+  booking_date          DateTime
+  start_time            DateTime
+  end_time              DateTime
+  purpose               String
+  permission_letter_url String
+  status                BookingStatus @default(pending)
+  approved_at           DateTime?
+  rejection_reason      String?
+  session_summary       String?
+  ai_summary            Json?
+  created_at            DateTime      @default(now())
+  updated_at            DateTime      @updatedAt
+
+  hall_id String
+  hall    SeminarHall @relation(fields: [hall_id], references: [id], onDelete: Cascade)
+
+  teacher_id String
+  teacher    Profile @relation("teacher_bookings", fields: [teacher_id], references: [id], onDelete: Cascade)
+
+  hod_id String?
+  hod    Profile? @relation("hod_approval", fields: [hod_id], references: [id], onDelete: SetNull)
+
+  logs          BookingLog[]
+  notifications Notification[]
+
+  @@index([hall_id, booking_date, start_time, end_time])
+  @@index([teacher_id])
+}
+
+model BookingLog {
+  id              String         @id @default(uuid())
+  action          String
+  previous_status BookingStatus?
+  new_status      BookingStatus?
+  notes           String?
+  metadata        Json?
+  created_at      DateTime       @default(now())
+
+  booking_id String
+  booking    Booking @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+
+  performed_by String
+  performer    Profile @relation("log_performed_by", fields: [performed_by], references: [id], onDelete: Cascade)
+
+  @@index([booking_id])
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  title      String
+  message    String
+  type       String
+  read       Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  user_id String
+  user    Profile @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  related_booking_id String?
+  relatedBooking     Booking? @relation(fields: [related_booking_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id])
+}
+
+model HallComponent {
+  id                String          @id @default(uuid())
+  name              String
+  type              ComponentType
+  status            ComponentStatus @default(operational)
+  location          String?
+  installation_date DateTime?
+  last_maintenance  DateTime?
+  notes             String?
+  created_at        DateTime        @default(now())
+  updated_at        DateTime        @updatedAt
+
+  hall_id String
+  hall    SeminarHall @relation(fields: [hall_id], references: [id], onDelete: Cascade)
+
+  maintenance_logs ComponentMaintenanceLog[]
+
+  @@index([hall_id])
+  @@index([status])
+}
+
+model ComponentMaintenanceLog {
+  id              String          @id @default(uuid())
+  action          String
+  previous_status ComponentStatus
+  new_status      ComponentStatus
+  notes           String?
+  created_at      DateTime        @default(now())
+
+  component_id String
+  component    HallComponent @relation(fields: [component_id], references: [id], onDelete: Cascade)
+
+  performed_by String
+  performer    Profile @relation(fields: [performed_by], references: [id], onDelete: Cascade)
+
+  @@index([component_id])
+}
